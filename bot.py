@@ -65,8 +65,9 @@ def load_users():
 
             return json.load(f)
 
-    except Exception:
+    except Exception as e:
 
+        print("USERS LOAD ERROR:", repr(e))
         return {}
 
 
@@ -111,6 +112,7 @@ def get_user(user_id):
 
     user = users[user_id]
 
+    # New day
     if user.get("last_date") != today:
 
         user["sites_today"] = 0
@@ -144,25 +146,23 @@ def generate_website(description):
     prompt = f"""
 You are Domain Maker, an expert web developer.
 
-Create a complete modern website based on the user's description.
+Create a complete modern website based on this description:
 
-USER DESCRIPTION:
 {description}
 
 IMPORTANT RULES:
 
-1. Return ONLY the complete HTML document.
-2. Do NOT use Markdown code fences.
-3. The result MUST start with <!DOCTYPE html>.
-4. Put all CSS inside a <style> tag.
-5. Put all JavaScript inside a <script> tag.
-6. Everything must be inside ONE HTML file.
-7. Do not use external files.
-8. Make the website responsive on phones and computers.
-9. Make the design polished, modern and visually appealing.
-10. Use semantic HTML where appropriate.
-11. Do not explain the code.
-12. Do not write anything before or after the HTML.
+1. Return ONLY the HTML code.
+2. Do NOT use Markdown.
+3. Do NOT use ```html.
+4. Do NOT explain anything.
+5. Everything must be inside ONE HTML file.
+6. Include HTML, CSS and JavaScript in the same file.
+7. Put CSS inside <style>.
+8. Put JavaScript inside <script>.
+9. Make the website responsive on phones and computers.
+10. Make the design modern and polished.
+11. Start directly with <!DOCTYPE html> or <html>.
 """
 
     response = ai.chat.completions.create(
@@ -178,21 +178,22 @@ IMPORTANT RULES:
     html = response.choices[0].message.content
 
     if not html:
-        raise Exception("AI returned empty response")
+
+        raise Exception(
+            "AI returned empty response"
+        )
 
     html = html.strip()
 
+    # =========================
+    # Clean Markdown
+    # =========================
+
     html = re.sub(
-        r"^```html\s*",
+        r"^```(?:html)?\s*",
         "",
         html,
         flags=re.IGNORECASE
-    )
-
-    html = re.sub(
-        r"^```\s*",
-        "",
-        html
     )
 
     html = re.sub(
@@ -203,7 +204,40 @@ IMPORTANT RULES:
 
     html = html.strip()
 
-    if "<!DOCTYPE html>" not in html.upper():
+    # =========================
+    # Find HTML
+    # =========================
+
+    html_lower = html.lower()
+
+    html_start = html_lower.find("<html")
+
+    doctype_start = html_lower.find("<!doctype html>")
+
+    if doctype_start != -1:
+
+        html = html[doctype_start:]
+
+    elif html_start != -1:
+
+        html = html[html_start:]
+
+        html = (
+            "<!DOCTYPE html>\n"
+            + html
+        )
+
+    else:
+
+        raise Exception(
+            "AI did not return HTML"
+        )
+
+    # =========================
+    # Final Validation
+    # =========================
+
+    if "<html" not in html.lower():
 
         raise Exception(
             "AI did not return a valid HTML document"
@@ -216,7 +250,9 @@ IMPORTANT RULES:
 # /start
 # =========================
 
-@app.on_message(filters.command("start"))
+@app.on_message(
+    filters.command("start")
+)
 async def start(client, message):
 
     user = get_user(
@@ -245,12 +281,13 @@ async def start(client, message):
         "مثلاً:\n"
         "یه سایت گیمینگ با تم مشکی و قرمز، "
         "منوی بالا و دکمه شروع بساز.\n\n"
-        f"سهمیه امروز: {user['sites_today']}/2"
+        f"سهمیه امروز: "
+        f"{user['sites_today']}/2"
     )
 
 
 # =========================
-# User Messages
+# Receive User Message
 # =========================
 
 @app.on_message(
@@ -263,10 +300,12 @@ async def receive_message(client, message):
         message.from_user.id
     )
 
+    # User is not creating a website
     if user["state"] != "waiting_description":
 
         return
 
+    # Daily limit
     if user["sites_today"] >= 2:
 
         await message.reply_text(
@@ -286,6 +325,7 @@ async def receive_message(client, message):
 
         return
 
+    # Save request
     user["request"] = description
     user["state"] = "generating"
 
@@ -298,11 +338,21 @@ async def receive_message(client, message):
 
     try:
 
+        # =========================
+        # Generate HTML
+        # =========================
+
         html = generate_website(
             user["request"]
         )
 
-        filename = f"index_{message.from_user.id}.html"
+        # =========================
+        # Create File
+        # =========================
+
+        filename = (
+            f"index_{message.from_user.id}.html"
+        )
 
         with open(
             filename,
@@ -312,14 +362,31 @@ async def receive_message(client, message):
 
             f.write(html)
 
-        user["sites_today"] += 1
+        # =========================
+        # Update User
+        # =========================
 
+        user["sites_today"] += 1
         user["state"] = "waiting_description"
         user["request"] = ""
 
         save_users()
 
-        await status.delete()
+        # =========================
+        # Delete Status
+        # =========================
+
+        try:
+
+            await status.delete()
+
+        except Exception:
+
+            pass
+
+        # =========================
+        # Send HTML
+        # =========================
 
         await message.reply_document(
             filename,
@@ -329,6 +396,10 @@ async def receive_message(client, message):
                 f"{user['sites_today']}/2"
             )
         )
+
+        # =========================
+        # Delete Temporary File
+        # =========================
 
         try:
 
