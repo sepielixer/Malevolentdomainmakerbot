@@ -112,7 +112,6 @@ def get_user(user_id):
 
     user = users[user_id]
 
-    # New day
     if user.get("last_date") != today:
 
         user["sites_today"] = 0
@@ -178,17 +177,11 @@ IMPORTANT RULES:
     html = response.choices[0].message.content
 
     if not html:
-
-        raise Exception(
-            "AI returned empty response"
-        )
+        raise Exception("AI returned empty response")
 
     html = html.strip()
 
-    # =========================
-    # Clean Markdown
-    # =========================
-
+    # Remove Markdown
     html = re.sub(
         r"^```(?:html)?\s*",
         "",
@@ -204,14 +197,10 @@ IMPORTANT RULES:
 
     html = html.strip()
 
-    # =========================
     # Find HTML
-    # =========================
-
     html_lower = html.lower()
 
     html_start = html_lower.find("<html")
-
     doctype_start = html_lower.find("<!doctype html>")
 
     if doctype_start != -1:
@@ -222,20 +211,11 @@ IMPORTANT RULES:
 
         html = html[html_start:]
 
-        html = (
-            "<!DOCTYPE html>\n"
-            + html
-        )
+        html = "<!DOCTYPE html>\n" + html
 
     else:
 
-        raise Exception(
-            "AI did not return HTML"
-        )
-
-    # =========================
-    # Final Validation
-    # =========================
+        raise Exception("AI did not return HTML")
 
     if "<html" not in html.lower():
 
@@ -287,25 +267,18 @@ async def start(client, message):
 
 
 # =========================
-# Receive User Message
+# /site
 # =========================
 
 @app.on_message(
-    filters.text
-    & ~filters.command(["start"])
+    filters.command("site")
 )
-async def receive_message(client, message):
+async def site_command(client, message):
 
     user = get_user(
         message.from_user.id
     )
 
-    # User is not creating a website
-    if user["state"] != "waiting_description":
-
-        return
-
-    # Daily limit
     if user["sites_today"] >= 2:
 
         await message.reply_text(
@@ -315,17 +288,53 @@ async def receive_message(client, message):
 
         return
 
-    description = message.text.strip()
+    user["state"] = "waiting_description"
+    user["request"] = ""
 
-    if not description:
+    save_users()
+
+    await message.reply_text(
+        "🌐 توضیح سایتی که می‌خوای رو بفرست.\n\n"
+        "مثلاً:\n"
+        "یه سایت گیمینگ با تم مشکی و قرمز بساز.\n\n"
+        f"سهمیه امروز: "
+        f"{user['sites_today']}/2"
+    )
+
+
+# =========================
+# User Messages
+# =========================
+
+@app.on_message(
+    filters.text
+    & ~filters.command(["start", "site"])
+)
+async def receive_message(client, message):
+
+    user = get_user(
+        message.from_user.id
+    )
+
+    # Only respond after /start or /site
+    if user["state"] != "waiting_description":
+
+        return
+
+    if user["sites_today"] >= 2:
 
         await message.reply_text(
-            "❌ لطفاً توضیح سایتت رو بنویس."
+            "❌ سهمیه امروزت تموم شده!"
         )
 
         return
 
-    # Save request
+    description = message.text.strip()
+
+    if not description:
+
+        return
+
     user["request"] = description
     user["state"] = "generating"
 
@@ -333,112 +342,4 @@ async def receive_message(client, message):
 
     status = await message.reply_text(
         "⏳ توضیحت دریافت شد.\n"
-        "دارم سایتت رو می‌سازم..."
-    )
-
-    try:
-
-        # =========================
-        # Generate HTML
-        # =========================
-
-        html = generate_website(
-            user["request"]
-        )
-
-        # =========================
-        # Create File
-        # =========================
-
-        filename = (
-            f"index_{message.from_user.id}.html"
-        )
-
-        with open(
-            filename,
-            "w",
-            encoding="utf-8"
-        ) as f:
-
-            f.write(html)
-
-        # =========================
-        # Update User
-        # =========================
-
-        user["sites_today"] += 1
-        user["state"] = "waiting_description"
-        user["request"] = ""
-
-        save_users()
-
-        # =========================
-        # Delete Status
-        # =========================
-
-        try:
-
-            await status.delete()
-
-        except Exception:
-
-            pass
-
-        # =========================
-        # Send HTML
-        # =========================
-
-        await message.reply_document(
-            filename,
-            caption=(
-                "✅ سایتت آماده شد! 🌐\n\n"
-                f"سهمیه امروز: "
-                f"{user['sites_today']}/2"
-            )
-        )
-
-        # =========================
-        # Delete Temporary File
-        # =========================
-
-        try:
-
-            os.remove(filename)
-
-        except OSError:
-
-            pass
-
-    except Exception as e:
-
-        print(
-            "AI ERROR:",
-            repr(e)
-        )
-
-        user["state"] = "waiting_description"
-        user["request"] = ""
-
-        save_users()
-
-        try:
-
-            await status.edit_text(
-                "❌ هنگام ساخت سایت خطایی رخ داد.\n\n"
-                "دوباره امتحان کن."
-            )
-
-        except Exception:
-
-            pass
-
-
-# =========================
-# Start Bot
-# =========================
-
-print(
-    "🚀 Domain Maker Bot Started!"
-)
-
-app.run()
+       
