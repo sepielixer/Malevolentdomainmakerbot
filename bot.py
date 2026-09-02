@@ -45,6 +45,7 @@ def load_users():
             "w",
             encoding="utf-8"
         ) as f:
+
             json.dump(
                 {},
                 f,
@@ -61,6 +62,7 @@ def load_users():
             "r",
             encoding="utf-8"
         ) as f:
+
             return json.load(f)
 
     except Exception:
@@ -109,7 +111,6 @@ def get_user(user_id):
 
     user = users[user_id]
 
-    # New day → reset limit
     if user.get("last_date") != today:
 
         user["sites_today"] = 0
@@ -165,9 +166,7 @@ IMPORTANT RULES:
 """
 
     response = ai.chat.completions.create(
-
         model="gemini-2.5-flash-lite",
-
         messages=[
             {
                 "role": "user",
@@ -183,7 +182,6 @@ IMPORTANT RULES:
 
     html = html.strip()
 
-    # Remove accidental Markdown code fences
     html = re.sub(
         r"^```html\s*",
         "",
@@ -265,12 +263,10 @@ async def receive_message(client, message):
         message.from_user.id
     )
 
-    # User isn't currently making a website
     if user["state"] != "waiting_description":
 
         return
 
-    # Daily limit
     if user["sites_today"] >= 2:
 
         await message.reply_text(
@@ -290,7 +286,6 @@ async def receive_message(client, message):
 
         return
 
-    # Save this user's request
     user["request"] = description
     user["state"] = "generating"
 
@@ -303,17 +298,12 @@ async def receive_message(client, message):
 
     try:
 
-        # Generate HTML
         html = generate_website(
             user["request"]
         )
 
-        # Temporary filename
-        filename = (
-            f"index_{message.from_user.id}.html"
-        )
+        filename = f"index_{message.from_user.id}.html"
 
-        # Write HTML file
         with open(
             filename,
             "w",
@@ -322,7 +312,62 @@ async def receive_message(client, message):
 
             f.write(html)
 
-        # Count the generated website
         user["sites_today"] += 1
 
-        user["state"] =
+        user["state"] = "waiting_description"
+        user["request"] = ""
+
+        save_users()
+
+        await status.delete()
+
+        await message.reply_document(
+            filename,
+            caption=(
+                "✅ سایتت آماده شد! 🌐\n\n"
+                f"سهمیه امروز: "
+                f"{user['sites_today']}/2"
+            )
+        )
+
+        try:
+
+            os.remove(filename)
+
+        except OSError:
+
+            pass
+
+    except Exception as e:
+
+        print(
+            "AI ERROR:",
+            repr(e)
+        )
+
+        user["state"] = "waiting_description"
+        user["request"] = ""
+
+        save_users()
+
+        try:
+
+            await status.edit_text(
+                "❌ هنگام ساخت سایت خطایی رخ داد.\n\n"
+                "دوباره امتحان کن."
+            )
+
+        except Exception:
+
+            pass
+
+
+# =========================
+# Start Bot
+# =========================
+
+print(
+    "🚀 Domain Maker Bot Started!"
+)
+
+app.run()
