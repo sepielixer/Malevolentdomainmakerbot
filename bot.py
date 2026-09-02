@@ -5,11 +5,11 @@ from datetime import date
 
 from dotenv import load_dotenv
 from pyrogram import Client, filters
-from google import genai
+from openai import OpenAI
 
 
 # =========================
-# تنظیمات
+# Load Environment
 # =========================
 
 load_dotenv()
@@ -21,64 +21,109 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 USERS_FILE = "users.json"
 
-gemini = genai.Client(api_key=GEMINI_API_KEY)
+
+# =========================
+# AI Client
+# =========================
+
+ai = OpenAI(
+    base_url="https://aimodelapi.onrender.com/v1",
+    api_key=GEMINI_API_KEY
+)
 
 
 # =========================
-# مدیریت کاربران
+# Users Database
 # =========================
 
 def load_users():
+
     if not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "w", encoding="utf-8") as f:
-            json.dump({}, f)
+
+        with open(
+            USERS_FILE,
+            "w",
+            encoding="utf-8"
+        ) as f:
+            json.dump(
+                {},
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
 
         return {}
 
     try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
+
+        with open(
+            USERS_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
             return json.load(f)
 
-    except (json.JSONDecodeError, OSError):
+    except Exception:
+
         return {}
 
 
 def save_users():
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
+
+    with open(
+        USERS_FILE,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            users,
+            f,
+            ensure_ascii=False,
+            indent=2
+        )
 
 
 users = load_users()
 
 
+# =========================
+# User State
+# =========================
+
 def get_user(user_id):
+
     user_id = str(user_id)
     today = str(date.today())
 
     if user_id not in users:
+
         users[user_id] = {
             "state": "idle",
             "request": "",
             "sites_today": 0,
             "last_date": today
         }
+
         save_users()
 
     user = users[user_id]
 
-    # ریست سهمیه در روز جدید
+    # New day → reset limit
     if user.get("last_date") != today:
+
         user["sites_today"] = 0
         user["last_date"] = today
         user["state"] = "idle"
         user["request"] = ""
+
         save_users()
 
     return user
 
 
 # =========================
-# ساخت بات
+# Telegram Bot
 # =========================
 
 app = Client(
@@ -90,20 +135,104 @@ app = Client(
 
 
 # =========================
+# Generate Website
+# =========================
+
+def generate_website(description):
+
+    prompt = f"""
+You are Domain Maker, an expert web developer.
+
+Create a complete modern website based on the user's description.
+
+USER DESCRIPTION:
+{description}
+
+IMPORTANT RULES:
+
+1. Return ONLY the complete HTML document.
+2. Do NOT use Markdown code fences.
+3. The result MUST start with <!DOCTYPE html>.
+4. Put all CSS inside a <style> tag.
+5. Put all JavaScript inside a <script> tag.
+6. Everything must be inside ONE HTML file.
+7. Do not use external files.
+8. Make the website responsive on phones and computers.
+9. Make the design polished, modern and visually appealing.
+10. Use semantic HTML where appropriate.
+11. Do not explain the code.
+12. Do not write anything before or after the HTML.
+"""
+
+    response = ai.chat.completions.create(
+
+        model="gemini-2.5-flash-lite",
+
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
+
+    html = response.choices[0].message.content
+
+    if not html:
+        raise Exception("AI returned empty response")
+
+    html = html.strip()
+
+    # Remove accidental Markdown code fences
+    html = re.sub(
+        r"^```html\s*",
+        "",
+        html,
+        flags=re.IGNORECASE
+    )
+
+    html = re.sub(
+        r"^```\s*",
+        "",
+        html
+    )
+
+    html = re.sub(
+        r"\s*```$",
+        "",
+        html
+    )
+
+    html = html.strip()
+
+    if "<!DOCTYPE html>" not in html.upper():
+
+        raise Exception(
+            "AI did not return a valid HTML document"
+        )
+
+    return html
+
+
+# =========================
 # /start
 # =========================
 
 @app.on_message(filters.command("start"))
 async def start(client, message):
 
-    user = get_user(message.from_user.id)
+    user = get_user(
+        message.from_user.id
+    )
 
     if user["sites_today"] >= 2:
+
         await message.reply_text(
             "سلام 👋\n\n"
-            "سهمیه امروزت استفاده شده.\n"
+            "❌ سهمیه امروزت تموم شده.\n"
             "هر کاربر روزانه حداکثر ۲ سایت می‌تونه بسازه."
         )
+
         return
 
     user["state"] = "waiting_description"
@@ -113,59 +242,17 @@ async def start(client, message):
 
     await message.reply_text(
         "سلام 👋🌐\n\n"
-        "توضیح سایتی که می‌خوای رو برام بفرست.\n\n"
+        "من Domain Maker هستم.\n\n"
+        "توضیح سایتی که می‌خوای رو بفرست.\n\n"
         "مثلاً:\n"
         "یه سایت گیمینگ با تم مشکی و قرمز، "
-        "منوی بالا و یک دکمه شروع بساز.\n\n"
+        "منوی بالا و دکمه شروع بساز.\n\n"
         f"سهمیه امروز: {user['sites_today']}/2"
     )
 
 
 # =========================
-# تولید سایت
-# =========================
-
-async def generate_website(description):
-
-    prompt = f"""
-You are Domain Maker, an expert web developer.
-
-Create a complete modern website based on the user's description below.
-
-USER DESCRIPTION:
-{description}
-
-IMPORTANT RULES:
-
-1. Return ONLY the complete HTML document.
-2. Do NOT use Markdown code fences.
-3. The result must start with <!DOCTYPE html>.
-4. Put CSS inside a <style> tag.
-5. Put JavaScript inside a <script> tag.
-6. Everything must be inside ONE HTML file.
-7. Make the website responsive for phones and computers.
-8. Make the design polished and modern.
-9. Do not explain the code.
-10. Do not include anything before or after the HTML document.
-"""
-
-    response = gemini.models.generate_content(
-        model="gemini-3-flash-preview",
-        contents=prompt
-    )
-
-    html = response.text.strip()
-
-    # اگر مدل اشتباهی Markdown برگرداند
-    html = re.sub(r"^```html\s*", "", html, flags=re.IGNORECASE)
-    html = re.sub(r"^```\s*", "", html)
-    html = re.sub(r"\s*```$", "", html)
-
-    return html.strip()
-
-
-# =========================
-# دریافت درخواست کاربر
+# User Messages
 # =========================
 
 @app.on_message(
@@ -174,94 +261,68 @@ IMPORTANT RULES:
 )
 async def receive_message(client, message):
 
-    user = get_user(message.from_user.id)
+    user = get_user(
+        message.from_user.id
+    )
 
-    # فقط وقتی منتظر توضیح سایت هستیم
+    # User isn't currently making a website
     if user["state"] != "waiting_description":
+
         return
 
-    # بررسی سهمیه
+    # Daily limit
     if user["sites_today"] >= 2:
+
         await message.reply_text(
             "❌ سهمیه امروزت تموم شده!\n\n"
             "هر کاربر روزانه فقط ۲ سایت می‌تونه بسازه."
         )
+
         return
 
     description = message.text.strip()
 
     if not description:
+
         await message.reply_text(
             "❌ لطفاً توضیح سایتت رو بنویس."
         )
+
         return
 
-    # ذخیره درخواست مخصوص همین کاربر
+    # Save this user's request
     user["request"] = description
     user["state"] = "generating"
 
     save_users()
 
     status = await message.reply_text(
-        "⏳ درخواستت دریافت شد.\n"
-        "دارم سایت رو با Gemini می‌سازم..."
+        "⏳ توضیحت دریافت شد.\n"
+        "دارم سایتت رو می‌سازم..."
     )
 
     try:
 
-        html = await generate_website(
+        # Generate HTML
+        html = generate_website(
             user["request"]
         )
 
-        # ساخت فایل مخصوص همین درخواست
-        filename = f"index_{message.from_user.id}.html"
+        # Temporary filename
+        filename = (
+            f"index_{message.from_user.id}.html"
+        )
 
-        with open(filename, "w", encoding="utf-8") as f:
+        # Write HTML file
+        with open(
+            filename,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
             f.write(html)
 
-        # ثبت مصرف سهمیه
+        # Count the generated website
         user["sites_today"] += 1
-        user["state"] = "waiting_description"
-        user["request"] = ""
 
-        save_users()
-
-        await status.delete()
-
-        await message.reply_document(
-            filename,
-            caption=(
-                "✅ سایتت آماده شد! 🌐\n\n"
-                f"سهمیه امروز: "
-                f"{user['sites_today']}/2"
-            )
-        )
-
-        # حذف فایل موقت
-        try:
-            os.remove(filename)
-        except OSError:
-            pass
-
-    except Exception as e:
-
-        print("Gemini Error:", e)
-
-        user["state"] = "waiting_description"
-        user["request"] = ""
-
-        save_users()
-
-        await status.edit_text(
-            "❌ متأسفانه هنگام ساخت سایت خطایی رخ داد.\n"
-            "دوباره امتحان کن."
-        )
-
-
-# =========================
-# اجرای بات
-# =========================
-
-print("Domain Maker Bot Started!")
-
-app.run()
+        user["state"] =
