@@ -341,5 +341,5 @@ async def receive_message(client, message):
     save_users()
 
     status = await message.reply_text(
-        "⏳ توضیحت دریافت شد.\n"
+        "⏳ توضیحت دریافت شد.\n")
        
